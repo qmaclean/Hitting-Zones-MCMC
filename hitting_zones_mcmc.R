@@ -181,9 +181,30 @@ new_df<-df %>%
       TRUE ~ as.character(NA)),
   last_play_abs = ifelse(lag(abs) == 1 | row_number() == 1,"Y","N"),
   batter_team = ifelse(about.isTopInning == "TRUE",as.character(away_team),as.character(home_team)),
-  batter_score = ifelse(batter_team == home_team,details.homeScore,details.awayScore)
+  batter_score = ifelse(batter_team == home_team,details.homeScore,details.awayScore),
+  batter_level = ifelse(batter_team == home_team,home_level_name,away_league_name),
+  batter_level = case_when(
+    batter_level == "Major League Baseball" ~ "MLB",
+    batter_level == "American League" ~ "MLB",
+    batter_level == "National League" ~ "MLB",
+    batter_level == "Double-A" ~ "AA",
+    batter_level == "Double-A Northeast" ~ "AA",
+    batter_level == "High-A" ~ "A",
+    batter_level == "High-A Central" ~ "A",
+    batter_level == "Low-A" ~ "A",
+    batter_level == "Low-A Southeast" ~ "A",
+    batter_level == "Triple-A" ~ "AAA",
+    batter_level == "Triple-A East" ~ "AAA",
+    batter_level == "High-A East" ~ "A",
+    batter_level == "Low-A East" ~ "A",
+    batter_level == "Double-A Central" ~ "AA",
+    batter_level == "Low-A West" ~ "A",
+    batter_level == "High-A West" ~ "A",
+    batter_level == "Double-A South" ~ "AA",
+    batter_level == "Triple-A West" ~ "AAA",
+    TRUE ~ as.character(NA))
   ) %>%
-  dplyr::select(game_date,result.event,hit_situation,hit_zone,batter_score,matchup.batter.fullName,batter_team,abs,abs_state,last_play_abs,hc_x_new,hc_y_new) %>%
+  dplyr::select(game_date,result.event,hit_situation,hit_zone,batter_score,matchup.batter.fullName,matchup.batter.id,batter_team,batter_level,abs,abs_state,last_play_abs,hc_x_new,hc_y_new) %>%
   dplyr::group_by(last_play_abs) %>%
   dplyr::mutate(seq = ifelse(last_play_abs == "Y",row_number(),NA)) %>%
   ungroup() %>%
@@ -197,6 +218,8 @@ new_df<-df %>%
   unite(play_state,hit_zone,
         sep = "--",remove = FALSE) %>%
   mutate(next_state = ifelse(abs ==1, abs_state,lead(play_state)))
+
+
 
 
 ##### this idea brought in from the following code:
@@ -283,7 +306,7 @@ hit_contribution_values <- absorption_df %>%
 
 player_values<-new_df %>%
   left_join(hit_contribution_values) %>%
-  dplyr::select(game_date,result.event,hit,hit_situation,hit_zone,batter_score,matchup.batter.fullName,batter_team,abs,abs_state,last_play_abs,hc_x_new,hc_y_new) %>%
+  dplyr::select(game_date,result.event,hit,hit_situation,hit_zone,batter_score,matchup.batter.fullName,matchup.batter.id,batter_team,batter_level,abs,abs_state,last_play_abs,hc_x_new,hc_y_new) %>%
   mutate(contr = case_when(
     is.na(abs_state) ~ lead(hit) - hit,
     abs_state == "hit" ~ 1 - hit,
@@ -293,16 +316,16 @@ player_values<-new_df %>%
 pv<-player_values %>%
   filter(!is.na(result.event),
          hit_zone != "No Zone") %>%
-  dplyr::select(game_date,result.event,matchup.batter.fullName,batter_team,contr,hit,hit_situation,hit_zone,batter_score,abs,abs_state,hc_x_new,hc_y_new) %>%
-  group_by(matchup.batter.fullName,batter_team) %>%
+  dplyr::select(game_date,result.event,matchup.batter.fullName,matchup.batter.id,batter_team,batter_level,contr,hit,hit_situation,hit_zone,batter_score,abs,abs_state,hc_x_new,hc_y_new) %>%
+  group_by(matchup.batter.fullName,matchup.batter.id,batter_team,batter_level) %>%
   summarise(contr = sum(contr,na.rm = TRUE),
             n = n())
 
 pv_zone<-player_values %>%
   filter(!is.na(result.event),
          hit_zone != "No Zone") %>%
-  dplyr::select(game_date,result.event,matchup.batter.fullName,batter_team,contr,hit,hit_situation,hit_zone,batter_score,abs,abs_state,hc_x_new,hc_y_new) %>%
-  group_by(matchup.batter.fullName,batter_team,hit_zone) %>%
+  dplyr::select(game_date,result.event,matchup.batter.fullName,matchup.batter.id,batter_team,batter_level,contr,hit,hit_situation,hit_zone,batter_score,abs,abs_state,hc_x_new,hc_y_new) %>%
+  group_by(matchup.batter.fullName,matchup.batter.id,batter_team,hit_zone,batter_level) %>%
   summarise(contr = sum(contr,na.rm = TRUE),
             n = n())
 
@@ -477,8 +500,45 @@ final_df %>%
 
 
 
+### create a plot that would show face by zone
+top_zone<-pv_zone %>%
+  filter(n >= 15,
+         batter_level == "MLB") %>% 
+  group_by(hit_zone) %>%
+  top_n(1,contr) %>%
+  left_join(d,by=c("hit_zone" = "z"))
 
+top_zone<-paste("baseball.fandom.com/wiki/")
 
+### Top MLB hitter by zone
+top_zone %>%
+  mutate(contr = round(contr,1)) %>%
+  #filter(des != "IF") %>%
+  ggplot() +
+  geom_text(aes(x=x,y=y,label = matchup.batter.fullName),size = 2,color="yellow",nudge_y = -0.2,check_overlap = TRUE) +
+  geom_text(aes(x=x,y=y,label = contr),size = 2,color="white",nudge_y = -4,check_overlap = TRUE) +
+  geom_curve(x = 20, xend = 240, y = -100, yend = -100,
+             curvature = -.50,color = "grey") +
+  geom_segment(x=125, xend = 20, y=-200, yend = -100,color="grey") +
+  geom_segment(x=125, xend = 240, y=-200, yend = -100,color="grey") +
+  theme(legend.position = "bottom",
+        axis.line = element_blank(),
+        panel.background = element_rect(fill = "dark green",
+                                        colour = "dark green"),
+        panel.border=element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        #axis.text.y=element_blank(),
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank()) +  
+  geom_curve(x = 86, xend = 170, y = -160, yend = -160,
+             curvature = -.55, linetype = "dotted") +
+  ylim(-205,0) +
+  xlim(15,240) +
+  labs(title = "Top Hitters - Zone Contributions",
+       subtitle = "2021 MLB Season")
+
+ggsave("Top_MLB_Hitters_Zone_2021.png")
 
 
 
